@@ -41,6 +41,13 @@ namespace TapoControllerGUI
         private ComboBox cmbPTZPresets = null!;
         private Button btnGotoPreset = null!;
         private OnvifPTZController? ptzController = null;
+        
+        // Video Streaming
+        private LibVLCSharp.Shared.LibVLC? _libVLC;
+        private LibVLCSharp.Shared.MediaPlayer? _mediaPlayer;
+        private LibVLCSharp.WinForms.VideoView? _videoView;
+        private string _cameraUsername = "admin";
+        private string _cameraPassword = "";
 
         private List<TapoCamera> discoveredCameras = new List<TapoCamera>();
 
@@ -48,6 +55,22 @@ namespace TapoControllerGUI
         {
             InitializeComponent();
             SetupProfessionalTheme();
+            InitializeLibVLC();
+        }
+        
+        private void InitializeLibVLC()
+        {
+            try
+            {
+                LibVLCSharp.Shared.Core.Initialize();
+                _libVLC = new LibVLCSharp.Shared.LibVLC();
+                _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
+                LogMessage("LibVLC initialized successfully.");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Failed to initialize LibVLC: {ex.Message}");
+            }
         }
 
         private void InitializeComponent()
@@ -481,6 +504,15 @@ namespace TapoControllerGUI
                 BorderStyle = BorderStyle.Fixed3D
             };
 
+            // Create VideoView for LibVLC
+            _videoView = new LibVLCSharp.WinForms.VideoView
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Black,
+                MediaPlayer = _mediaPlayer,
+                Visible = false
+            };
+            
             lblStreamPlaceholder = new Label
             {
                 Text = "Live Video Stream\n\nSelect a camera and click 'Start Stream'\nto view live video feed here",
@@ -491,6 +523,7 @@ namespace TapoControllerGUI
                 Font = new Font("Segoe UI", 10F)
             };
             
+            pnlVideoStream.Controls.Add(_videoView);
             pnlVideoStream.Controls.Add(lblStreamPlaceholder);
 
             var streamButtons = new FlowLayoutPanel
@@ -642,20 +675,91 @@ namespace TapoControllerGUI
                 var camera = dgvCameras.SelectedRows[0].DataBoundItem as TapoCamera;
                 if (camera != null)
                 {
-                    lblStreamPlaceholder.Text = $"Connecting to camera stream...\n{camera.IPAddress}";
-                    LogMessage($"Starting stream from {camera.IPAddress}");
-                    btnStartStream.Enabled = false;
-                    btnStopStream.Enabled = true;
+                    // Show credentials dialog
+                    var credDialog = new CameraCredentialsDialog(_cameraUsername, _cameraPassword);
+                    if (credDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        _cameraUsername = credDialog.Username;
+                        _cameraPassword = credDialog.Password;
+                        
+                        StartCameraStream(camera.IPAddress);
+                    }
                 }
+            }
+        }
+        
+        private void StartCameraStream(string ipAddress)
+        {
+            try
+            {
+                if (_mediaPlayer == null || _libVLC == null)
+                {
+                    LogMessage("LibVLC not initialized. Cannot start stream.");
+                    return;
+                }
+                
+                // Stop any existing stream
+                StopCameraStream();
+                
+                // Build RTSP URL with credentials
+                // Tapo cameras typically use: rtsp://username:password@ip:554/stream1
+                string rtspUrl = $"rtsp://{_cameraUsername}:{_cameraPassword}@{ipAddress}:554/stream1";
+                
+                LogMessage($"Starting stream from {ipAddress}");
+                LogMessage($"RTSP URL: rtsp://{_cameraUsername}:****@{ipAddress}:554/stream1");
+                
+                var media = new LibVLCSharp.Shared.Media(_libVLC, rtspUrl, LibVLCSharp.Shared.FromType.FromLocation);
+                media.AddOption(":network-caching=300");
+                media.AddOption(":rtsp-tcp");
+                
+                _mediaPlayer.Media = media;
+                
+                // Show video view, hide placeholder
+                lblStreamPlaceholder.Visible = false;
+                _videoView!.Visible = true;
+                
+                _mediaPlayer.Play();
+                
+                btnStartStream.Enabled = false;
+                btnStopStream.Enabled = true;
+                
+                LogMessage("Stream started successfully.");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error starting stream: {ex.Message}");
+                lblStreamPlaceholder.Visible = true;
+                _videoView!.Visible = false;
             }
         }
 
         private void BtnStopStream_Click(object? sender, EventArgs e)
         {
-            lblStreamPlaceholder.Text = "Live Video Stream\n\nSelect a camera and click 'Start Stream'\nto view live video feed here";
-            LogMessage("Stream stopped.");
-            btnStartStream.Enabled = true;
-            btnStopStream.Enabled = false;
+            StopCameraStream();
+        }
+        
+        private void StopCameraStream()
+        {
+            try
+            {
+                if (_mediaPlayer != null && _mediaPlayer.IsPlaying)
+                {
+                    _mediaPlayer.Stop();
+                }
+                
+                lblStreamPlaceholder.Visible = true;
+                _videoView!.Visible = false;
+                lblStreamPlaceholder.Text = "Live Video Stream\n\nSelect a camera and click 'Start Stream'\nto view live video feed here";
+                
+                btnStartStream.Enabled = true;
+                btnStopStream.Enabled = false;
+                
+                LogMessage("Stream stopped.");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error stopping stream: {ex.Message}");
+            }
         }
 
         // Core Functionality
