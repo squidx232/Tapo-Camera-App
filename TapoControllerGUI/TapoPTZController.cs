@@ -96,14 +96,24 @@ namespace TapoControllerGUI
                 try
                 {
                     var response = await _httpClient.PostAsync(endpoint, content);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    
                     if (response.IsSuccessStatusCode)
                     {
                         LogCallback?.Invoke($"PTZ command sent successfully to: {endpoint}");
+                        if (responseContent.Contains("Fault") || responseContent.Contains("Error"))
+                        {
+                            LogCallback?.Invoke($"SOAP Fault detected: {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
+                        }
                         return true;
                     }
                     else
                     {
                         LogCallback?.Invoke($"PTZ failed on {endpoint}: Status {response.StatusCode}");
+                        if (!string.IsNullOrEmpty(responseContent))
+                        {
+                            LogCallback?.Invoke($"Response: {responseContent.Substring(0, Math.Min(150, responseContent.Length))}");
+                        }
                     }
                 }
                 catch (Exception ex)
