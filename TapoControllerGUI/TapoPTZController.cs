@@ -77,11 +77,12 @@ namespace TapoControllerGUI
 
         private async Task<bool> SendPTZCommand(string command, string parameters = "")
         {
+            // Port 443 works! Use it first
             var endpoints = new[]
             {
-                $"https://{_host}:2020/onvif/ptz_service",
-                $"http://{_host}:2020/onvif/ptz_service",
                 $"https://{_host}:443/onvif/ptz_service",
+                $"https://{_host}:443/onvif/ptz",
+                $"http://{_host}:2020/onvif/ptz_service",
                 $"http://{_host}:2020/onvif/ptz",
                 $"http://{_host}:8000/onvif/ptz",
                 $"http://{_host}:80/onvif/ptz"
