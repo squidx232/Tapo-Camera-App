@@ -16,6 +16,7 @@
     <PackageReference Include="Smdn.TPSmartHomeDevices.Tapo" Version="2.1.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
     <PackageReference Include="Onvif.Core" Version="3.0.0" />
+    <PackageReference Include="TapoSharp" Version="1.0.4.1" />
   </ItemGroup>
 
 </Project>
