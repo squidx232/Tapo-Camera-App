@@ -28,6 +28,19 @@ namespace TapoControllerGUI
         private Button btnStartStream = null!;
         private Button btnStopStream = null!;
         private Label lblStreamPlaceholder = null!;
+        
+        // PTZ Controls
+        private GroupBox grpPTZControls = null!;
+        private Button btnPTZUp = null!;
+        private Button btnPTZDown = null!;
+        private Button btnPTZLeft = null!;
+        private Button btnPTZRight = null!;
+        private Button btnPTZZoomIn = null!;
+        private Button btnPTZZoomOut = null!;
+        private Button btnPTZStop = null!;
+        private ComboBox cmbPTZPresets = null!;
+        private Button btnGotoPreset = null!;
+        private OnvifPTZController? ptzController = null;
 
         private List<TapoCamera> discoveredCameras = new List<TapoCamera>();
 
@@ -223,18 +236,21 @@ namespace TapoControllerGUI
             var bottomContainer = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1
             };
 
-            bottomContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
-            bottomContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+            bottomContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));
+            bottomContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            bottomContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
 
             var logPanel = CreateLogPanel();
+            var ptzPanel = CreatePTZPanel();
             var streamPanel = CreateStreamPanel();
 
             bottomContainer.Controls.Add(logPanel, 0, 0);
-            bottomContainer.Controls.Add(streamPanel, 1, 0);
+            bottomContainer.Controls.Add(ptzPanel, 1, 0);
+            bottomContainer.Controls.Add(streamPanel, 2, 0);
 
             return bottomContainer;
         }
@@ -263,6 +279,151 @@ namespace TapoControllerGUI
             LogMessage("System initialized. Ready to scan for cameras.");
             
             return grpLog;
+        }
+
+        private Control CreatePTZPanel()
+        {
+            grpPTZControls = new GroupBox
+            {
+                Text = "PTZ Controls",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10),
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Enabled = false
+            };
+
+            var container = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                RowCount = 5,
+                ColumnCount = 3,
+                Padding = new Padding(5)
+            };
+
+            // Configure rows and columns
+            for (int i = 0; i < 5; i++)
+                container.RowStyles.Add(new RowStyle(SizeType.Percent, 20F));
+            
+            for (int i = 0; i < 3; i++)
+                container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+
+            // Row 0: Up button
+            btnPTZUp = new Button
+            {
+                Text = "▲",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Margin = new Padding(2)
+            };
+            btnPTZUp.Click += async (s, e) => await PTZMoveUp();
+            container.Controls.Add(btnPTZUp, 1, 0);
+
+            // Row 1: Left, Stop, Right buttons
+            btnPTZLeft = new Button
+            {
+                Text = "◄",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Margin = new Padding(2)
+            };
+            btnPTZLeft.Click += async (s, e) => await PTZMoveLeft();
+            container.Controls.Add(btnPTZLeft, 0, 1);
+
+            btnPTZStop = new Button
+            {
+                Text = "■",
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(220, 50, 50),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Margin = new Padding(2)
+            };
+            btnPTZStop.Click += async (s, e) => await PTZStop();
+            container.Controls.Add(btnPTZStop, 1, 1);
+
+            btnPTZRight = new Button
+            {
+                Text = "►",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Margin = new Padding(2)
+            };
+            btnPTZRight.Click += async (s, e) => await PTZMoveRight();
+            container.Controls.Add(btnPTZRight, 2, 1);
+
+            // Row 2: Down button
+            btnPTZDown = new Button
+            {
+                Text = "▼",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Margin = new Padding(2)
+            };
+            btnPTZDown.Click += async (s, e) => await PTZMoveDown();
+            container.Controls.Add(btnPTZDown, 1, 2);
+
+            // Row 3: Zoom buttons
+            btnPTZZoomIn = new Button
+            {
+                Text = "Zoom +",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 9F),
+                Margin = new Padding(2)
+            };
+            btnPTZZoomIn.Click += async (s, e) => await PTZZoomIn();
+            container.Controls.Add(btnPTZZoomIn, 0, 3);
+
+            btnPTZZoomOut = new Button
+            {
+                Text = "Zoom -",
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                Font = new Font("Segoe UI", 9F),
+                Margin = new Padding(2)
+            };
+            btnPTZZoomOut.Click += async (s, e) => await PTZZoomOut();
+            container.Controls.Add(btnPTZZoomOut, 2, 3);
+
+            // Row 4: Presets
+            var presetPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false
+            };
+
+            cmbPTZPresets = new ComboBox
+            {
+                Width = 150,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbPTZPresets.Items.AddRange(new[] { "Preset 1", "Preset 2", "Preset 3", "Preset 4" });
+            cmbPTZPresets.SelectedIndex = 0;
+
+            btnGotoPreset = new Button
+            {
+                Text = "Go to Preset",
+                Width = 150,
+                Height = 25,
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                Margin = new Padding(0, 5, 0, 0)
+            };
+            btnGotoPreset.Click += async (s, e) => await PTZGotoPreset();
+
+            presetPanel.Controls.Add(cmbPTZPresets);
+            presetPanel.Controls.Add(btnGotoPreset);
+
+            container.Controls.Add(presetPanel, 0, 4);
+            container.SetColumnSpan(presetPanel, 3);
+
+            grpPTZControls.Controls.Add(container);
+            return grpPTZControls;
         }
 
         private Control CreateStreamPanel()
@@ -460,10 +621,17 @@ namespace TapoControllerGUI
         {
             bool hasSelection = dgvCameras.SelectedRows.Count > 0;
             btnStartStream.Enabled = hasSelection;
+            grpPTZControls.Enabled = hasSelection;
             
             if (hasSelection && dgvCameras.SelectedRows[0].DataBoundItem is TapoCamera camera)
             {
                 LogMessage($"Selected camera: {camera.IPAddress} ({camera.Model})");
+                InitializePTZController(camera.IPAddress);
+            }
+            else
+            {
+                ptzController?.Disconnect();
+                ptzController = null;
             }
         }
 
@@ -670,6 +838,172 @@ namespace TapoControllerGUI
                 return $"{parts[0]}.{parts[1]}.{parts[2]}";
             }
             return "192.168.1";
+        }
+
+        // PTZ Control Methods
+        private void InitializePTZController(string ipAddress)
+        {
+            try
+            {
+                // Default ONVIF credentials - user should configure these
+                ptzController = new OnvifPTZController(ipAddress, "admin", "admin");
+                LogMessage($"PTZ controller initialized for {ipAddress}");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Failed to initialize PTZ controller: {ex.Message}");
+            }
+        }
+
+        private async Task PTZMoveUp()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.MoveUpAsync(0.5f);
+                LogMessage("PTZ: Moving Up");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Up error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZMoveDown()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.MoveDownAsync(0.5f);
+                LogMessage("PTZ: Moving Down");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Down error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZMoveLeft()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.MoveLeftAsync(0.5f);
+                LogMessage("PTZ: Moving Left");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Left error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZMoveRight()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.MoveRightAsync(0.5f);
+                LogMessage("PTZ: Moving Right");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Right error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZZoomIn()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.ZoomInAsync(0.5f);
+                LogMessage("PTZ: Zooming In");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Zoom In error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZZoomOut()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                await ptzController.ZoomOutAsync(0.5f);
+                LogMessage("PTZ: Zooming Out");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Zoom Out error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZStop()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                await ptzController.StopAsync();
+                LogMessage("PTZ: Stopped");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Stop error: {ex.Message}");
+            }
+        }
+
+        private async Task PTZGotoPreset()
+        {
+            if (ptzController == null) return;
+            try
+            {
+                if (!await ptzController.ConnectAsync())
+                {
+                    LogMessage("Failed to connect to camera for PTZ control");
+                    return;
+                }
+                var presetIndex = cmbPTZPresets.SelectedIndex;
+                var success = await ptzController.GotoPresetAsync(presetIndex);
+                if (success)
+                    LogMessage($"PTZ: Going to Preset {presetIndex + 1}");
+                else
+                    LogMessage($"PTZ: Failed to go to Preset {presetIndex + 1}");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"PTZ Preset error: {ex.Message}");
+            }
         }
     }
 

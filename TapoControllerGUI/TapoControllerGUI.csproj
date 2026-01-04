@@ -15,6 +15,7 @@
     <PackageReference Include="LibVLCSharp.WinForms" Version="3.9.5" />
     <PackageReference Include="Smdn.TPSmartHomeDevices.Tapo" Version="2.1.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
+    <PackageReference Include="Onvif.Core" Version="3.0.0" />
   </ItemGroup>
 
 </Project>
