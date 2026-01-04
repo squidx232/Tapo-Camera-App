@@ -750,42 +750,65 @@ namespace TapoControllerGUI
         {
             try
             {
-                using var client = new System.Net.Http.HttpClient();
-                client.Timeout = TimeSpan.FromMilliseconds(800);
-                
-                var portsToCheck = new List<int> { 443, 80 };
-                
-                foreach (var port in portsToCheck)
+                // Configure HttpClient to accept self-signed certificates (Tapo cameras use self-signed certs)
+                var handler = new System.Net.Http.HttpClientHandler
                 {
-                    var baseUrl = port == 443 ? $"https://{ip}" : $"http://{ip}";
+                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                };
+                
+                using var client = new System.Net.Http.HttpClient(handler);
+                client.Timeout = TimeSpan.FromMilliseconds(1000);
+                
+                // Check HTTPS first (port 443) - Tapo cameras typically use HTTPS
+                try
+                {
+                    var response = await client.GetAsync($"https://{ip}");
+                    var content = await response.Content.ReadAsStringAsync();
                     
-                    var tapoEndpoints = new[]
+                    // Look for Tapo/TP-Link signatures
+                    if (content.Contains("tapo", StringComparison.OrdinalIgnoreCase) ||
+                        content.Contains("tp-link", StringComparison.OrdinalIgnoreCase) ||
+                        content.Contains("SMART.IPCAMERA", StringComparison.OrdinalIgnoreCase) ||
+                        content.Contains("ipcamera", StringComparison.OrdinalIgnoreCase))
                     {
-                        $"{baseUrl}/stok=/ds",
-                        $"{baseUrl}/cgi-bin/luci/web",
-                        baseUrl
-                    };
+                        return true;
+                    }
                     
-                    foreach (var endpoint in tapoEndpoints)
+                    // If we got any response on HTTPS 443, it's likely a camera
+                    if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                     {
-                        try
-                        {
-                            var response = await client.GetAsync(endpoint);
-                            var content = await response.Content.ReadAsStringAsync();
-                            
-                            if (content.Contains("tapo", StringComparison.OrdinalIgnoreCase) ||
-                                content.Contains("tp-link", StringComparison.OrdinalIgnoreCase) ||
-                                content.Contains("SMART.IPCAMERA", StringComparison.OrdinalIgnoreCase))
-                            {
-                                return true;
-                            }
-                        }
-                        catch
-                        {
-                            continue;
-                        }
+                        return true;
                     }
                 }
+                catch
+                {
+                    // Try HTTP if HTTPS fails
+                    try
+                    {
+                        var response = await client.GetAsync($"http://{ip}");
+                        var content = await response.Content.ReadAsStringAsync();
+                        
+                        if (content.Contains("tapo", StringComparison.OrdinalIgnoreCase) ||
+                            content.Contains("tp-link", StringComparison.OrdinalIgnoreCase) ||
+                            content.Contains("ipcamera", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                    catch { }
+                }
+                
+                // Check if RTSP port (554) is open - Tapo cameras have RTSP
+                try
+                {
+                    using var tcpClient = new System.Net.Sockets.TcpClient();
+                    await tcpClient.ConnectAsync(ip, 554).WaitAsync(TimeSpan.FromMilliseconds(500), cancellationToken);
+                    if (tcpClient.Connected)
+                    {
+                        return true; // Has RTSP port, likely a camera
+                    }
+                }
+                catch { }
             }
             catch
             {
