@@ -977,6 +977,7 @@ namespace TapoControllerGUI
             {
                 // Use the same credentials as streaming
                 ptzController = new TapoPTZController(ipAddress, _cameraUsername, _cameraPassword);
+                ptzController.LogCallback = LogMessage; // Connect logging
                 LogMessage($"PTZ controller initialized for {ipAddress}");
             }
             catch (Exception ex)
@@ -990,13 +991,14 @@ namespace TapoControllerGUI
             if (ptzController == null) return;
             try
             {
+                LogMessage("PTZ: Attempting to move Up...");
                 if (!await ptzController.ConnectAsync())
                 {
                     LogMessage("Failed to connect to camera for PTZ control");
                     return;
                 }
-                await ptzController.MoveUpAsync(0.5f);
-                LogMessage("PTZ: Moving Up");
+                var result = await ptzController.MoveUpAsync(0.5f);
+                LogMessage(result ? "PTZ: Move Up command sent successfully" : "PTZ: Move Up command failed");
             }
             catch (Exception ex)
             {

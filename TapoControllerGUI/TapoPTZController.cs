@@ -11,6 +11,7 @@ namespace TapoControllerGUI
         private readonly string _username;
         private readonly string _password;
         private readonly HttpClient _httpClient;
+        public Action<string>? LogCallback { get; set; }
 
         public TapoPTZController(string host, string username, string password)
         {
@@ -96,22 +97,26 @@ namespace TapoControllerGUI
                     var response = await _httpClient.PostAsync(endpoint, content);
                     if (response.IsSuccessStatusCode)
                     {
-                        Console.WriteLine($"PTZ command sent successfully to: {endpoint}");
+                        LogCallback?.Invoke($"PTZ command sent successfully to: {endpoint}");
                         return true;
+                    }
+                    else
+                    {
+                        LogCallback?.Invoke($"PTZ failed on {endpoint}: Status {response.StatusCode}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"PTZ failed on {endpoint}: {ex.Message}");
+                    LogCallback?.Invoke($"PTZ failed on {endpoint}: {ex.Message}");
                     continue;
                 }
             }
 
-            Console.WriteLine("PTZ command failed on all endpoints");
+            LogCallback?.Invoke("PTZ command failed on all endpoints");
             return false;
         }
 
-        public async Task MoveAsync(float panSpeed, float tiltSpeed, float zoomSpeed = 0)
+        public async Task<bool> MoveAsync(float panSpeed, float tiltSpeed, float zoomSpeed = 0)
         {
             var body = $@"
             <ProfileToken>profile_1</ProfileToken>
@@ -120,7 +125,7 @@ namespace TapoControllerGUI
                 <Zoom x=""{zoomSpeed}"" xmlns=""http://www.onvif.org/ver10/schema""/>
             </Velocity>";
 
-            await SendPTZCommand("ContinuousMove", body);
+            return await SendPTZCommand("ContinuousMove", body);
         }
 
         public async Task StopAsync()
@@ -133,7 +138,7 @@ namespace TapoControllerGUI
             await SendPTZCommand("Stop", body);
         }
 
-        public async Task MoveUpAsync(float speed = 0.5f) => await MoveAsync(0, speed, 0);
+        public async Task<bool> MoveUpAsync(float speed = 0.5f) => await MoveAsync(0, speed, 0);
         public async Task MoveDownAsync(float speed = 0.5f) => await MoveAsync(0, -speed, 0);
         public async Task MoveLeftAsync(float speed = 0.5f) => await MoveAsync(-speed, 0, 0);
         public async Task MoveRightAsync(float speed = 0.5f) => await MoveAsync(speed, 0, 0);
