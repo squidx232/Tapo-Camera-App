@@ -78,6 +78,9 @@ namespace TapoControllerGUI
         {
             var endpoints = new[]
             {
+                $"https://{_host}:2020/onvif/ptz_service",
+                $"http://{_host}:2020/onvif/ptz_service",
+                $"https://{_host}:443/onvif/ptz_service",
                 $"http://{_host}:2020/onvif/ptz",
                 $"http://{_host}:8000/onvif/ptz",
                 $"http://{_host}:80/onvif/ptz"
@@ -92,14 +95,19 @@ namespace TapoControllerGUI
                 {
                     var response = await _httpClient.PostAsync(endpoint, content);
                     if (response.IsSuccessStatusCode)
+                    {
+                        Console.WriteLine($"PTZ command sent successfully to: {endpoint}");
                         return true;
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"PTZ failed on {endpoint}: {ex.Message}");
                     continue;
                 }
             }
 
+            Console.WriteLine("PTZ command failed on all endpoints");
             return false;
         }
 
