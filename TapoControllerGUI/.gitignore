@@ -1,0 +1,23 @@
+## Ignore build outputs
+bin/
+obj/
+
+## Ignore backup files
+*.backup
+*.backup_*
+*.beforefix
+*.before_*
+*.current_broken
+
+## Ignore temporary files
+tmp_*
+
+## Ignore user-specific files
+*.user
+*.suo
+.vs/
+.vscode/
+
+## Ignore OS files
+Thumbs.db
+.DS_Store
