@@ -40,7 +40,7 @@ namespace TapoControllerGUI
         private Button btnPTZStop = null!;
         private ComboBox cmbPTZPresets = null!;
         private Button btnGotoPreset = null!;
-        private OnvifPTZController? ptzController = null;
+        private TapoPTZController? ptzController = null;
         
         // Video Streaming
         private LibVLCSharp.Shared.LibVLC? _libVLC;
@@ -682,6 +682,9 @@ namespace TapoControllerGUI
                         _cameraUsername = credDialog.Username;
                         _cameraPassword = credDialog.Password;
                         
+                        // Reinitialize PTZ controller with new credentials
+                        InitializePTZController(camera.IPAddress);
+                        
                         StartCameraStream(camera.IPAddress);
                     }
                 }
@@ -972,8 +975,8 @@ namespace TapoControllerGUI
         {
             try
             {
-                // Default ONVIF credentials - user should configure these
-                ptzController = new OnvifPTZController(ipAddress, "admin", "admin");
+                // Use the same credentials as streaming
+                ptzController = new TapoPTZController(ipAddress, _cameraUsername, _cameraPassword);
                 LogMessage($"PTZ controller initialized for {ipAddress}");
             }
             catch (Exception ex)
