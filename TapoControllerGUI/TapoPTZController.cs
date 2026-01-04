@@ -66,24 +66,24 @@ namespace TapoControllerGUI
         private string CreateONVIFRequest(string action, string xmlns, string body = "")
         {
             return $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope"">
+<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope"" xmlns:tptz=""http://www.onvif.org/ver20/ptz/wsdl"" xmlns:tt=""http://www.onvif.org/ver10/schema"">
     <s:Body>
-        <{action} xmlns=""{xmlns}"">
+        <tptz:{action}>
             {body}
-        </{action}>
+        </tptz:{action}>
     </s:Body>
 </s:Envelope>";
         }
 
         private async Task<bool> SendPTZCommand(string command, string parameters = "")
         {
-            // Port 443 works! Use it first
+            // Try port 2020 first (Tapo standard), then 443
             var endpoints = new[]
             {
+                $"http://{_host}:2020/onvif/ptz",
+                $"http://{_host}:2020/onvif/ptz_service",
                 $"https://{_host}:443/onvif/ptz_service",
                 $"https://{_host}:443/onvif/ptz",
-                $"http://{_host}:2020/onvif/ptz_service",
-                $"http://{_host}:2020/onvif/ptz",
                 $"http://{_host}:8000/onvif/ptz",
                 $"http://{_host}:80/onvif/ptz"
             };
@@ -120,11 +120,11 @@ namespace TapoControllerGUI
         public async Task<bool> MoveAsync(float panSpeed, float tiltSpeed, float zoomSpeed = 0)
         {
             var body = $@"
-            <ProfileToken>profile_1</ProfileToken>
-            <Velocity>
-                <PanTilt x=""{panSpeed}"" y=""{tiltSpeed}"" xmlns=""http://www.onvif.org/ver10/schema""/>
-                <Zoom x=""{zoomSpeed}"" xmlns=""http://www.onvif.org/ver10/schema""/>
-            </Velocity>";
+            <tptz:ProfileToken>MediaProfile000</tptz:ProfileToken>
+            <tptz:Velocity>
+                <tt:PanTilt x=""{panSpeed}"" y=""{tiltSpeed}""/>
+                <tt:Zoom x=""{zoomSpeed}""/>
+            </tptz:Velocity>";
 
             return await SendPTZCommand("ContinuousMove", body);
         }
@@ -132,9 +132,9 @@ namespace TapoControllerGUI
         public async Task StopAsync()
         {
             var body = @"
-            <ProfileToken>profile_1</ProfileToken>
-            <PanTilt>true</PanTilt>
-            <Zoom>true</Zoom>";
+            <tptz:ProfileToken>MediaProfile000</tptz:ProfileToken>
+            <tptz:PanTilt>true</tptz:PanTilt>
+            <tptz:Zoom>true</tptz:Zoom>";
 
             await SendPTZCommand("Stop", body);
         }
