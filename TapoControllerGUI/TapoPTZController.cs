@@ -1,9 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
-using System.Security.Cryptography;
 
 namespace TapoControllerGUI
 {
@@ -13,7 +11,6 @@ namespace TapoControllerGUI
         private readonly string _username;
         private readonly string _password;
         private readonly HttpClient _httpClient;
-        private string? _stok;
 
         public TapoPTZController(string host, string username, string password)
         {
@@ -23,156 +20,130 @@ namespace TapoControllerGUI
             
             var handler = new HttpClientHandler
             {
-                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true,
+                Credentials = new System.Net.NetworkCredential(username, password),
+                PreAuthenticate = true
             };
             _httpClient = new HttpClient(handler);
-            _httpClient.Timeout = TimeSpan.FromSeconds(10);
+            _httpClient.Timeout = TimeSpan.FromSeconds(5);
         }
 
         public async Task<bool> ConnectAsync()
         {
-            try
+            // Test ONVIF connection on multiple possible endpoints
+            var endpoints = new[]
             {
-                // Authenticate with Tapo camera
-                var loginUrl = $"https://{_host}";
-                
-                // Step 1: Handshake
-                var handshakePayload = new
-                {
-                    method = "login",
-                    parameters = new
-                    {
-                        username = _username,
-                        password = _password
-                    }
-                };
+                $"http://{_host}:2020/onvif/device_service",
+                $"http://{_host}:8000/onvif/device_service",
+                $"http://{_host}:80/onvif/device_service",
+                $"https://{_host}:443/onvif/device_service"
+            };
 
-                var json = JsonSerializer.Serialize(handshakePayload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                
-                var response = await _httpClient.PostAsync(loginUrl, content);
-                var responseContent = await response.Content.ReadAsStringAsync();
-                
-                // Extract stok token from response
-                if (responseContent.Contains("stok="))
+            foreach (var endpoint in endpoints)
+            {
+                try
                 {
-                    var stokStart = responseContent.IndexOf("stok=") + 5;
-                    var stokEnd = responseContent.IndexOf("/", stokStart);
-                    if (stokEnd > stokStart)
+                    var soapRequest = CreateONVIFRequest("GetDeviceInformation", "http://www.onvif.org/ver10/device/wsdl");
+                    var content = new StringContent(soapRequest, Encoding.UTF8, "application/soap+xml");
+                    
+                    var response = await _httpClient.PostAsync(endpoint, content);
+                    if (response.IsSuccessStatusCode)
                     {
-                        _stok = responseContent.Substring(stokStart, stokEnd - stokStart);
+                        Console.WriteLine($"ONVIF connection successful: {endpoint}");
                         return true;
                     }
                 }
-                
-                return false;
+                catch
+                {
+                    continue;
+                }
             }
-            catch
-            {
-                return false;
-            }
+            
+            return false;
         }
 
-        private async Task<bool> SendPTZCommand(string method, object? parameters = null)
+        private string CreateONVIFRequest(string action, string xmlns, string body = "")
         {
-            try
-            {
-                if (string.IsNullOrEmpty(_stok))
-                {
-                    if (!await ConnectAsync())
-                        return false;
-                }
-
-                var url = $"https://{_host}/stok={_stok}/ds";
-                
-                var payload = new
-                {
-                    method = method,
-                    parameters = parameters ?? new { }
-                };
-
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                
-                var response = await _httpClient.PostAsync(url, content);
-                return response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
+            return $@"<?xml version=""1.0"" encoding=""UTF-8""?>
+<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope"">
+    <s:Body>
+        <{action} xmlns=""{xmlns}"">
+            {body}
+        </{action}>
+    </s:Body>
+</s:Envelope>";
         }
 
-        public async Task MoveAsync(string direction)
+        private async Task<bool> SendPTZCommand(string command, string parameters = "")
         {
-            // Tapo motor_move command
-            await SendPTZCommand("do", new
+            var endpoints = new[]
             {
-                motor = new
+                $"http://{_host}:2020/onvif/ptz",
+                $"http://{_host}:8000/onvif/ptz",
+                $"http://{_host}:80/onvif/ptz"
+            };
+
+            var soapRequest = CreateONVIFRequest(command, "http://www.onvif.org/ver20/ptz/wsdl", parameters);
+            var content = new StringContent(soapRequest, Encoding.UTF8, "application/soap+xml");
+
+            foreach (var endpoint in endpoints)
+            {
+                try
                 {
-                    move = new
-                    {
-                        x_coord = direction == "right" ? "1" : direction == "left" ? "-1" : "0",
-                        y_coord = direction == "up" ? "1" : direction == "down" ? "-1" : "0"
-                    }
+                    var response = await _httpClient.PostAsync(endpoint, content);
+                    if (response.IsSuccessStatusCode)
+                        return true;
                 }
-            });
+                catch
+                {
+                    continue;
+                }
+            }
+
+            return false;
+        }
+
+        public async Task MoveAsync(float panSpeed, float tiltSpeed, float zoomSpeed = 0)
+        {
+            var body = $@"
+            <ProfileToken>profile_1</ProfileToken>
+            <Velocity>
+                <PanTilt x=""{panSpeed}"" y=""{tiltSpeed}"" xmlns=""http://www.onvif.org/ver10/schema""/>
+                <Zoom x=""{zoomSpeed}"" xmlns=""http://www.onvif.org/ver10/schema""/>
+            </Velocity>";
+
+            await SendPTZCommand("ContinuousMove", body);
         }
 
         public async Task StopAsync()
         {
-            // Stop command - send zero movement
-            await SendPTZCommand("do", new
-            {
-                motor = new
-                {
-                    stop = new { }
-                }
-            });
+            var body = @"
+            <ProfileToken>profile_1</ProfileToken>
+            <PanTilt>true</PanTilt>
+            <Zoom>true</Zoom>";
+
+            await SendPTZCommand("Stop", body);
         }
 
-        public async Task MoveUpAsync(float speed = 0.5f) => await MoveAsync("up");
-        public async Task MoveDownAsync(float speed = 0.5f) => await MoveAsync("down");
-        public async Task MoveLeftAsync(float speed = 0.5f) => await MoveAsync("left");
-        public async Task MoveRightAsync(float speed = 0.5f) => await MoveAsync("right");
-        
-        public async Task ZoomInAsync(float speed = 0.5f)
-        {
-            // Tapo cameras don't typically support zoom via API
-            await Task.CompletedTask;
-        }
-        
-        public async Task ZoomOutAsync(float speed = 0.5f)
-        {
-            // Tapo cameras don't typically support zoom via API
-            await Task.CompletedTask;
-        }
+        public async Task MoveUpAsync(float speed = 0.5f) => await MoveAsync(0, speed, 0);
+        public async Task MoveDownAsync(float speed = 0.5f) => await MoveAsync(0, -speed, 0);
+        public async Task MoveLeftAsync(float speed = 0.5f) => await MoveAsync(-speed, 0, 0);
+        public async Task MoveRightAsync(float speed = 0.5f) => await MoveAsync(speed, 0, 0);
+        public async Task ZoomInAsync(float speed = 0.5f) => await MoveAsync(0, 0, speed);
+        public async Task ZoomOutAsync(float speed = 0.5f) => await MoveAsync(0, 0, -speed);
 
         public async Task<bool> GotoPresetAsync(int presetNumber)
         {
-            try
-            {
-                // Tapo preset command
-                return await SendPTZCommand("do", new
-                {
-                    preset = new
-                    {
-                        goto_preset = new
-                        {
-                            id = (presetNumber + 1).ToString()
-                        }
-                    }
-                });
-            }
-            catch
-            {
-                return false;
-            }
+            var body = $@"
+            <ProfileToken>profile_1</ProfileToken>
+            <PresetToken>preset_{presetNumber + 1}</PresetToken>";
+
+            return await SendPTZCommand("GotoPreset", body);
         }
 
         public void Disconnect()
         {
-            _stok = null;
+            // Clean up
         }
     }
 }
