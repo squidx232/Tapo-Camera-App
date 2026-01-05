@@ -48,6 +48,16 @@ namespace TapoControllerGUI
         private LibVLCSharp.WinForms.VideoView? _videoView;
         private string _cameraUsername = "admin";
         private string _cameraPassword = "";
+        
+        // OCR Components
+        private IOCRProcessor? _ocrProcessor;
+        private System.Windows.Forms.Timer? _ocrTimer;
+        private TextBox? _txtOCRResults;
+        private CheckBox? _chkEnableOCR;
+        private NumericUpDown? _numOCRInterval;
+        private Button? _btnCaptureFrame;
+        private bool _isOCRProcessing = false;
+        private Panel? _ocrIndicator;
 
         private List<TapoCamera> discoveredCameras = new List<TapoCamera>();
 
@@ -66,6 +76,71 @@ namespace TapoControllerGUI
                 _libVLC = new LibVLCSharp.Shared.LibVLC();
                 _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
                 LogMessage("LibVLC initialized successfully.");
+                
+                // Initialize OCR processor - try Windows OCR first, fallback to Tesseract
+                bool ocrInitialized = false;
+                
+                LogMessage("Trying to create Windows OCR processor...");
+                try
+                {
+                    LogMessage("Creating WindowsOCRProcessor instance...");
+                    var windowsOcr = new WindowsOCRProcessor();
+                    LogMessage("Setting callbacks...");
+                    windowsOcr.LogCallback = LogMessage;
+                    windowsOcr.OCRResultCallback = UpdateOCRDisplay;
+                    
+                    LogMessage("Calling Initialize...");
+                    if (windowsOcr.Initialize())
+                    {
+                        _ocrProcessor = windowsOcr;
+                        LogMessage("Using Windows built-in OCR engine.");
+                        ocrInitialized = true;
+                    }
+                    else
+                    {
+                        LogMessage("Windows OCR Initialize returned false");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogMessage($"Windows OCR creation/initialization error: {ex.GetType().Name}: {ex.Message}");
+                    if (ex.InnerException != null)
+                    {
+                        LogMessage($"Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    }
+                }
+                
+                // Fallback to Tesseract if Windows OCR failed
+                if (!ocrInitialized)
+                {
+                    LogMessage("Windows OCR not available, trying Tesseract...");
+                    try
+                    {
+                        _ocrProcessor = new OCRProcessor();
+                        _ocrProcessor.LogCallback = LogMessage;
+                        _ocrProcessor.OCRResultCallback = UpdateOCRDisplay;
+                        
+                        if (_ocrProcessor.Initialize())
+                        {
+                            LogMessage("OCR processor ready (Tesseract).");
+                            ocrInitialized = true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"Tesseract OCR initialization error: {ex.Message}");
+                    }
+                }
+                
+                if (!ocrInitialized)
+                {
+                    LogMessage("OCR processor initialization failed. OCR features will be disabled.");
+                }
+                
+                // Setup OCR timer (default 2 seconds interval)
+                _ocrTimer = new System.Windows.Forms.Timer();
+                _ocrTimer.Interval = 2000;
+                _ocrTimer.Tick += OCRTimer_Tick;
             }
             catch (Exception ex)
             {
@@ -462,12 +537,13 @@ namespace TapoControllerGUI
             var container = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                RowCount = 3,
+                RowCount = 4,
                 ColumnCount = 1
             };
 
             container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             container.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            container.RowStyles.Add(new RowStyle(SizeType.Absolute, 120F)); // OCR panel
             container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var streamControls = new FlowLayoutPanel
@@ -525,6 +601,31 @@ namespace TapoControllerGUI
             
             pnlVideoStream.Controls.Add(_videoView);
             pnlVideoStream.Controls.Add(lblStreamPlaceholder);
+            
+            // Add OCR scan indicator overlay
+            _ocrIndicator = new Panel
+            {
+                BackColor = Color.Transparent,
+                BorderStyle = BorderStyle.None,
+                Visible = false,
+                Dock = DockStyle.Fill
+            };
+            _ocrIndicator.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(Color.Lime, 3))
+                {
+                    e.Graphics.DrawRectangle(pen, 5, 5, _ocrIndicator.Width - 10, _ocrIndicator.Height - 10);
+                    
+                    // Draw "OCR Scanning..." text
+                    using (var font = new Font("Segoe UI", 16, FontStyle.Bold))
+                    using (var brush = new SolidBrush(Color.Lime))
+                    {
+                        e.Graphics.DrawString("🔍 OCR Scanning...", font, brush, 15, 15);
+                    }
+                }
+            };
+            pnlVideoStream.Controls.Add(_ocrIndicator);
+            _ocrIndicator.BringToFront();
 
             var streamButtons = new FlowLayoutPanel
             {
@@ -562,12 +663,116 @@ namespace TapoControllerGUI
             streamButtons.Controls.Add(btnStartStream);
             streamButtons.Controls.Add(btnStopStream);
 
+            // Create OCR panel
+            var ocrPanel = CreateOCRPanel();
+
             container.Controls.Add(streamControls, 0, 0);
             container.Controls.Add(pnlVideoStream, 0, 1);
-            container.Controls.Add(streamButtons, 0, 2);
+            container.Controls.Add(ocrPanel, 0, 2);
+            container.Controls.Add(streamButtons, 0, 3);
 
             grpCameraStream.Controls.Add(container);
             return grpCameraStream;
+        }
+        
+        private Control CreateOCRPanel()
+        {
+            var grpOCR = new GroupBox
+            {
+                Text = "OCR Text Recognition",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(5),
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Bold)
+            };
+
+            var ocrContainer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                RowCount = 2,
+                ColumnCount = 1
+            };
+
+            ocrContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            ocrContainer.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+            // OCR Controls
+            var ocrControlsPanel = new FlowLayoutPanel
+            {
+                Height = 30,
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false
+            };
+
+            _chkEnableOCR = new CheckBox
+            {
+                Text = "Enable OCR",
+                AutoSize = true,
+                Font = new Font("Segoe UI", 8F),
+                Margin = new Padding(0, 5, 10, 0)
+            };
+            _chkEnableOCR.CheckedChanged += ChkEnableOCR_CheckedChanged;
+
+            ocrControlsPanel.Controls.Add(new Label
+            {
+                Text = "Interval (sec):",
+                AutoSize = true,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 8, 5, 0),
+                Font = new Font("Segoe UI", 8F)
+            });
+
+            _numOCRInterval = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 30,
+                Value = 2,
+                Width = 50,
+                Font = new Font("Segoe UI", 8F),
+                Margin = new Padding(0, 5, 10, 0)
+            };
+            _numOCRInterval.ValueChanged += (s, e) =>
+            {
+                if (_ocrTimer != null)
+                {
+                    _ocrTimer.Interval = (int)_numOCRInterval.Value * 1000;
+                }
+            };
+
+            _btnCaptureFrame = new Button
+            {
+                Text = "Capture Now",
+                Height = 25,
+                Width = 90,
+                Font = new Font("Segoe UI", 8F),
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                Margin = new Padding(0, 3, 0, 0)
+            };
+            _btnCaptureFrame.Click += BtnCaptureFrame_Click;
+
+            ocrControlsPanel.Controls.Add(_chkEnableOCR);
+            ocrControlsPanel.Controls.Add(_numOCRInterval);
+            ocrControlsPanel.Controls.Add(_btnCaptureFrame);
+
+            // OCR Results Display
+            _txtOCRResults = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                BackColor = Color.White,
+                ForeColor = Color.DarkGreen,
+                Font = new Font("Consolas", 9F, FontStyle.Bold),
+                ScrollBars = ScrollBars.Vertical,
+                Text = "OCR readings will appear here..."
+            };
+
+            ocrContainer.Controls.Add(ocrControlsPanel, 0, 0);
+            ocrContainer.Controls.Add(_txtOCRResults, 0, 1);
+
+            grpOCR.Controls.Add(ocrContainer);
+            return grpOCR;
         }
 
         private void CreateStatusBar()
@@ -1136,6 +1341,180 @@ namespace TapoControllerGUI
             {
                 LogMessage($"PTZ Preset error: {ex.Message}");
             }
+        }
+
+        // OCR Event Handlers
+        private void ChkEnableOCR_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_chkEnableOCR?.Checked == true)
+            {
+                if (_mediaPlayer != null && _mediaPlayer.IsPlaying)
+                {
+                    _ocrTimer?.Start();
+                    LogMessage("OCR automatic scanning enabled.");
+                }
+                else
+                {
+                    _chkEnableOCR.Checked = false;
+                    LogMessage("Please start video stream before enabling OCR.");
+                }
+            }
+            else
+            {
+                _ocrTimer?.Stop();
+                LogMessage("OCR automatic scanning disabled.");
+            }
+        }
+
+        private async void BtnCaptureFrame_Click(object? sender, EventArgs e)
+        {
+            await CaptureAndProcessFrame();
+        }
+
+        private async void OCRTimer_Tick(object? sender, EventArgs e)
+        {
+            await CaptureAndProcessFrame();
+        }
+
+        private async Task CaptureAndProcessFrame()
+        {
+            if (_mediaPlayer == null || !_mediaPlayer.IsPlaying || _videoView == null)
+            {
+                return;
+            }
+            
+            if (_ocrProcessor == null)
+            {
+                LogMessage("OCR processor not initialized");
+                return;
+            }
+            
+            // Skip if already processing
+            if (_isOCRProcessing)
+            {
+                return;
+            }
+
+            try
+            {
+                _isOCRProcessing = true;
+                
+                // Show visual indicator
+                this.Invoke(new Action(() =>
+                {
+                    if (_ocrIndicator != null)
+                    {
+                        _ocrIndicator.Visible = true;
+                        _ocrIndicator.Refresh();
+                    }
+                }));
+                
+                // Capture frame from the video view control
+                Bitmap? screenshot = null;
+                
+                this.Invoke(new Action(() =>
+                {
+                    try
+                    {
+                        // Get the actual video view bounds
+                        var rect = _videoView.Bounds;
+                        
+                        if (rect.Width > 10 && rect.Height > 10)
+                        {
+                            screenshot = new Bitmap(rect.Width, rect.Height);
+                            
+                            // Draw the entire panel including the video
+                            var parent = _videoView.Parent;
+                            if (parent != null)
+                            {
+                                parent.DrawToBitmap(screenshot, new Rectangle(0, 0, rect.Width, rect.Height));
+                            }
+                            else
+                            {
+                                _videoView.DrawToBitmap(screenshot, new Rectangle(0, 0, rect.Width, rect.Height));
+                            }
+                            
+                            LogMessage($"Captured frame: {rect.Width}x{rect.Height}");
+                        }
+                        else
+                        {
+                            LogMessage($"Video view too small: {rect.Width}x{rect.Height}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"Error capturing video view: {ex.Message}");
+                    }
+                }));
+
+                if (screenshot != null)
+                {
+                    try
+                    {
+                        // Process the frame with OCR
+                        var ocrText = await _ocrProcessor.ProcessFrameAsync(screenshot);
+                        
+                        if (!string.IsNullOrWhiteSpace(ocrText))
+                        {
+                            this.Invoke(new Action(() =>
+                            {
+                                var timestamp = DateTime.Now.ToString("HH:mm:ss");
+                                _txtOCRResults!.AppendText($"\r\n[{timestamp}] {ocrText}\r\n");
+                                _txtOCRResults.SelectionStart = _txtOCRResults.Text.Length;
+                                _txtOCRResults.ScrollToCaret();
+                            }));
+                        }
+                    }
+                    finally
+                    {
+                        screenshot.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"OCR capture error: {ex.Message}");
+            }
+            finally
+            {
+                _isOCRProcessing = false;
+                
+                // Hide visual indicator after a short delay
+                Task.Delay(500).ContinueWith(_ =>
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        if (_ocrIndicator != null)
+                        {
+                            _ocrIndicator.Visible = false;
+                        }
+                    }));
+                });
+            }
+        }
+
+        private void UpdateOCRDisplay(string text)
+        {
+            // This is called by the OCR processor when text is detected
+            if (_txtOCRResults != null && _txtOCRResults.InvokeRequired)
+            {
+                _txtOCRResults.Invoke(new Action(() => UpdateOCRDisplay(text)));
+                return;
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            
+            // Clean up resources
+            _ocrTimer?.Stop();
+            _ocrTimer?.Dispose();
+            _ocrProcessor?.Dispose();
+            
+            StopCameraStream();
+            _mediaPlayer?.Dispose();
+            _libVLC?.Dispose();
         }
     }
 

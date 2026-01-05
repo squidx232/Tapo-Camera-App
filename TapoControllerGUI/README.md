@@ -19,6 +19,15 @@ A Windows Forms application for managing and controlling TP-Link Tapo PTZ camera
 - **Multiple Quality Options**: Support for different stream qualities
 - **Snapshot Capture**: Take snapshots from the video feed
 
+### 🔤 OCR Text Recognition (NEW!)
+- **Automatic Text Scanning**: Periodically capture and analyze frames for text
+- **PLC/HMI Monitoring**: Read data from industrial displays and HMI screens
+- **Configurable Intervals**: Set scan frequency from 1-30 seconds
+- **Manual Capture**: Instantly capture and analyze current frame
+- **Real-time Display**: View detected text with timestamps
+- **Visual Feedback**: Green border indicator shows when OCR is actively scanning
+- **Windows Built-in OCR**: Uses native Windows 10/11 OCR engine (no additional setup required!)
+
 ## Requirements
 
 - .NET 10.0 or later
@@ -31,12 +40,32 @@ A Windows Forms application for managing and controlling TP-Link Tapo PTZ camera
 - **LibVLCSharp** (v3.9.5) - Video streaming
 - **AForge** (v2.2.5) - Video processing
 - **VideoLAN.LibVLC.Windows** (v3.0.21) - VLC media player library
+- **Windows.Media.Ocr** - Built-in Windows OCR (requires Windows 10+)
+- **Tesseract** (v5.2.0) - OCR fallback option
 
 ## Building the Project
+
+**IMPORTANT**: Close the application if it's running before building!
 
 ```powershell
 dotnet build
 ```
+
+### Running the Application
+
+```powershell
+# Use the batch file for easy launching
+.\RunTapoWithOCR.bat
+
+# Or run directly
+dotnet run
+```
+
+### OCR Setup
+
+**Good News!** OCR works out-of-the-box on Windows 10/11 using the built-in Windows.Media.Ocr engine. No additional setup required! 🎉
+
+The application will automatically use Windows OCR for text recognition.
 
 ## Running the Application
 
@@ -89,8 +118,14 @@ Or build and run the executable from Visual Studio.
    - Use preset buttons to move to saved positions
 5. **View Stream**:
    - Select a camera
-   - Click "View Stream" to open the video viewer
-   - Configure stream URL and credentials if needed
+   - Click "Start Stream" and enter credentials
+   - Video will appear in the Live Camera Stream panel
+6. **Use OCR** (for PLC/HMI monitoring):
+   - Ensure video stream is active
+   - Check "Enable OCR" to start automatic text scanning
+   - Adjust scan interval as needed (default: 2 seconds)
+   - Click "Capture Now" for immediate text detection
+   - OCR readings appear in the text box below with timestamps
 
 ## Configuration
 
