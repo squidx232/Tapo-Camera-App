@@ -152,27 +152,29 @@ namespace TapoControllerGUI
 
         private Bitmap PreprocessImage(Bitmap original)
         {
-            // Create a copy to work with
-            Bitmap processed = new Bitmap(original.Width, original.Height);
+            // Scale up 2x for better OCR accuracy
+            int newWidth = original.Width * 2;
+            int newHeight = original.Height * 2;
             
-            using (Graphics g = Graphics.FromImage(processed))
+            Bitmap enlarged = new Bitmap(newWidth, newHeight);
+            using (Graphics g = Graphics.FromImage(enlarged))
             {
-                // Improve image quality for OCR
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
                 g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
                 g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
                 
-                g.DrawImage(original, 0, 0, original.Width, original.Height);
+                g.DrawImage(original, 0, 0, newWidth, newHeight);
             }
             
-            // Convert to grayscale for better OCR
-            processed = ConvertToGrayscale(processed);
+            // Convert to grayscale with contrast enhancement
+            Bitmap processed = ConvertToGrayscaleEnhanced(enlarged);
+            enlarged.Dispose();
             
             return processed;
         }
 
-        private Bitmap ConvertToGrayscale(Bitmap original)
+        private Bitmap ConvertToGrayscaleEnhanced(Bitmap original)
         {
             Bitmap grayscale = new Bitmap(original.Width, original.Height);
             
@@ -181,8 +183,19 @@ namespace TapoControllerGUI
                 for (int x = 0; x < original.Width; x++)
                 {
                     Color pixelColor = original.GetPixel(x, y);
-                    int grayScale = (int)((pixelColor.R * 0.3) + (pixelColor.G * 0.59) + (pixelColor.B * 0.11));
-                    Color grayColor = Color.FromArgb(pixelColor.A, grayScale, grayScale, grayScale);
+                    
+                    // Standard grayscale conversion
+                    int grayValue = (int)((pixelColor.R * 0.299) + (pixelColor.G * 0.587) + (pixelColor.B * 0.114));
+                    
+                    // Apply contrast enhancement (1.5x boost)
+                    grayValue = (int)((grayValue - 128) * 1.5 + 128);
+                    grayValue = Math.Max(0, Math.Min(255, grayValue));
+                    
+                    // Optional: Apply threshold for black/white text
+                    // Uncomment below for even sharper text recognition
+                    // if (grayValue > 128) grayValue = 255; else grayValue = 0;
+                    
+                    Color grayColor = Color.FromArgb(pixelColor.A, grayValue, grayValue, grayValue);
                     grayscale.SetPixel(x, y, grayColor);
                 }
             }

@@ -8,11 +8,50 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 using System.Threading;
+using System.Runtime.InteropServices;
 
 namespace TapoControllerGUI
 {
     public partial class ProfessionalTapoForm : Form
     {
+        // Windows API for screen capture
+        [DllImport("user32.dll")]
+        private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+        
+        [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        
+        [DllImport("user32.dll")]
+        private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+        
+        [DllImport("user32.dll")]
+        private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+        
+        [DllImport("user32.dll")]
+        private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, int nFlags);
+        
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+        
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+        
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+        
         private DataGridView dgvCameras = null!;
         private Button btnScanNetwork = null!;
         private Button btnStopScan = null!;
@@ -48,6 +87,7 @@ namespace TapoControllerGUI
         private LibVLCSharp.WinForms.VideoView? _videoView;
         private string _cameraUsername = "admin";
         private string _cameraPassword = "";
+        private float _videoZoom = 1.0f;
         
         // OCR Components
         private IOCRProcessor? _ocrProcessor;
@@ -77,64 +117,19 @@ namespace TapoControllerGUI
                 _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
                 LogMessage("LibVLC initialized successfully.");
                 
-                // Initialize OCR processor - try Windows OCR first, fallback to Tesseract
-                bool ocrInitialized = false;
+                // Initialize OCR processor - Use Cloud OCR (no dependencies!)
+                LogMessage("Initializing Cloud OCR engine (OCR.space API)...");
+                _ocrProcessor = new CloudOCRProcessor();
+                _ocrProcessor.LogCallback = LogMessage;
+                _ocrProcessor.OCRResultCallback = UpdateOCRDisplay;
                 
-                LogMessage("Trying to create Windows OCR processor...");
-                try
+                if (_ocrProcessor.Initialize())
                 {
-                    LogMessage("Creating WindowsOCRProcessor instance...");
-                    var windowsOcr = new WindowsOCRProcessor();
-                    LogMessage("Setting callbacks...");
-                    windowsOcr.LogCallback = LogMessage;
-                    windowsOcr.OCRResultCallback = UpdateOCRDisplay;
-                    
-                    LogMessage("Calling Initialize...");
-                    if (windowsOcr.Initialize())
-                    {
-                        _ocrProcessor = windowsOcr;
-                        LogMessage("Using Windows built-in OCR engine.");
-                        ocrInitialized = true;
-                    }
-                    else
-                    {
-                        LogMessage("Windows OCR Initialize returned false");
-                    }
+                    LogMessage("Cloud OCR engine ready! No local dependencies required.");
                 }
-                catch (Exception ex)
+                else
                 {
-                    LogMessage($"Windows OCR creation/initialization error: {ex.GetType().Name}: {ex.Message}");
-                    if (ex.InnerException != null)
-                    {
-                        LogMessage($"Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
-                    }
-                }
-                
-                // Fallback to Tesseract if Windows OCR failed
-                if (!ocrInitialized)
-                {
-                    LogMessage("Windows OCR not available, trying Tesseract...");
-                    try
-                    {
-                        _ocrProcessor = new OCRProcessor();
-                        _ocrProcessor.LogCallback = LogMessage;
-                        _ocrProcessor.OCRResultCallback = UpdateOCRDisplay;
-                        
-                        if (_ocrProcessor.Initialize())
-                        {
-                            LogMessage("OCR processor ready (Tesseract).");
-                            ocrInitialized = true;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogMessage($"Tesseract OCR initialization error: {ex.Message}");
-                    }
-                }
-                
-                if (!ocrInitialized)
-                {
-                    LogMessage("OCR processor initialization failed. OCR features will be disabled.");
+                    LogMessage("OCR initialization failed.");
                 }
                 
                 // Setup OCR timer (default 2 seconds interval)
@@ -577,7 +572,8 @@ namespace TapoControllerGUI
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.Black,
-                BorderStyle = BorderStyle.Fixed3D
+                BorderStyle = BorderStyle.Fixed3D,
+                MinimumSize = new Size(200, 150)
             };
 
             // Create VideoView for LibVLC
@@ -660,8 +656,48 @@ namespace TapoControllerGUI
             };
             btnStopStream.Click += BtnStopStream_Click;
 
+            // Digital Zoom Controls
+            var btnZoomIn = new Button
+            {
+                Text = "Zoom In (+)",
+                Height = 30,
+                Width = 100,
+                BackColor = Color.FromArgb(16, 124, 16),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Standard,
+                Margin = new Padding(20, 0, 0, 0)
+            };
+            btnZoomIn.Click += (s, e) => AdjustDigitalZoom(0.1f);
+
+            var btnZoomOut = new Button
+            {
+                Text = "Zoom Out (-)",
+                Height = 30,
+                Width = 100,
+                BackColor = Color.FromArgb(16, 124, 16),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Standard,
+                Margin = new Padding(5, 0, 0, 0)
+            };
+            btnZoomOut.Click += (s, e) => AdjustDigitalZoom(-0.1f);
+
+            var btnZoomReset = new Button
+            {
+                Text = "Reset Zoom",
+                Height = 30,
+                Width = 100,
+                BackColor = Color.FromArgb(90, 90, 90),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Standard,
+                Margin = new Padding(5, 0, 0, 0)
+            };
+            btnZoomReset.Click += (s, e) => ResetDigitalZoom();
+
             streamButtons.Controls.Add(btnStartStream);
             streamButtons.Controls.Add(btnStopStream);
+            streamButtons.Controls.Add(btnZoomIn);
+            streamButtons.Controls.Add(btnZoomOut);
+            streamButtons.Controls.Add(btnZoomReset);
 
             // Create OCR panel
             var ocrPanel = CreateOCRPanel();
@@ -1412,40 +1448,31 @@ namespace TapoControllerGUI
                 // Capture frame from the video view control
                 Bitmap? screenshot = null;
                 
-                this.Invoke(new Action(() =>
+                // Try to capture from VLC window instead of the panel
+                try
                 {
-                    try
+                    var vlcWindow = FindVLCWindow();
+                    if (vlcWindow != IntPtr.Zero)
                     {
-                        // Get the actual video view bounds
-                        var rect = _videoView.Bounds;
-                        
-                        if (rect.Width > 10 && rect.Height > 10)
+                        screenshot = CaptureWindow(vlcWindow);
+                        if (screenshot != null)
                         {
-                            screenshot = new Bitmap(rect.Width, rect.Height);
-                            
-                            // Draw the entire panel including the video
-                            var parent = _videoView.Parent;
-                            if (parent != null)
-                            {
-                                parent.DrawToBitmap(screenshot, new Rectangle(0, 0, rect.Width, rect.Height));
-                            }
-                            else
-                            {
-                                _videoView.DrawToBitmap(screenshot, new Rectangle(0, 0, rect.Width, rect.Height));
-                            }
-                            
-                            LogMessage($"Captured frame: {rect.Width}x{rect.Height}");
+                            LogMessage($"Captured from VLC window: {screenshot.Width}x{screenshot.Height}");
                         }
                         else
                         {
-                            LogMessage($"Video view too small: {rect.Width}x{rect.Height}");
+                            LogMessage("Failed to capture VLC window");
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        LogMessage($"Error capturing video view: {ex.Message}");
+                        LogMessage("VLC window not found");
                     }
-                }));
+                }
+                catch (Exception ex)
+                {
+                    LogMessage($"Error capturing VLC window: {ex.Message}");
+                }
 
                 if (screenshot != null)
                 {
@@ -1516,6 +1543,100 @@ namespace TapoControllerGUI
             _mediaPlayer?.Dispose();
             _libVLC?.Dispose();
         }
+        
+        private void AdjustDigitalZoom(float delta)
+        {
+            _videoZoom += delta;
+            _videoZoom = Math.Max(0.5f, Math.Min(5.0f, _videoZoom)); // Limit between 0.5x and 5.0x
+            
+            if (_mediaPlayer != null)
+            {
+                _mediaPlayer.Scale = _videoZoom;
+                LogMessage($"Digital zoom set to: {_videoZoom:F1}x");
+            }
+        }
+        
+        private void ResetDigitalZoom()
+        {
+            _videoZoom = 1.0f;
+            if (_mediaPlayer != null)
+            {
+                _mediaPlayer.Scale = _videoZoom;
+                LogMessage("Digital zoom reset to 1.0x");
+            }
+        }
+        
+        private IntPtr FindVLCWindow()
+        {
+            // Try to find VLC window by title
+            var vlcWindow = FindWindow(null, "VLC (Direct3D11 output)");
+            if (vlcWindow == IntPtr.Zero)
+            {
+                vlcWindow = FindWindow(null, "VLC (DirectX output)");
+            }
+            if (vlcWindow == IntPtr.Zero)
+            {
+                vlcWindow = FindWindow(null, "VLC (Direct3D output)");
+            }
+            return vlcWindow;
+        }
+        
+        private Bitmap? CaptureWindow(IntPtr hWnd)
+        {
+            IntPtr previousWindow = IntPtr.Zero;
+            try
+            {
+                // Remember the currently focused window
+                previousWindow = GetForegroundWindow();
+                
+                // Bring VLC window to foreground temporarily
+                SetForegroundWindow(hWnd);
+                
+                // Small delay to ensure window is brought forward
+                System.Threading.Thread.Sleep(50);
+                
+                // Get client area (video content without title bar)
+                RECT clientRect;
+                if (!GetClientRect(hWnd, out clientRect))
+                {
+                    return null;
+                }
+                
+                // Convert client rect to screen coordinates
+                POINT topLeft = new POINT { X = 0, Y = 0 };
+                ClientToScreen(hWnd, ref topLeft);
+                
+                int width = clientRect.Right - clientRect.Left;
+                int height = clientRect.Bottom - clientRect.Top;
+                
+                if (width <= 0 || height <= 0)
+                {
+                    return null;
+                }
+                
+                // Capture the screen at VLC window location
+                Bitmap bitmap = new Bitmap(width, height);
+                using (Graphics g = Graphics.FromImage(bitmap))
+                {
+                    g.CopyFromScreen(topLeft.X, topLeft.Y, 0, 0, new Size(width, height));
+                }
+                
+                return bitmap;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Screen capture error: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                // Restore the previously focused window
+                if (previousWindow != IntPtr.Zero && previousWindow != hWnd)
+                {
+                    SetForegroundWindow(previousWindow);
+                }
+            }
+        }
     }
 
     public class TapoCamera
@@ -1526,3 +1647,4 @@ namespace TapoControllerGUI
         public string LastSeen { get; set; } = string.Empty;
     }
 }
+
